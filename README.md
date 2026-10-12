@@ -1,6 +1,6 @@
 # tf-adviser
 
-オンラインポーカーのプリフロップをリアルタイムで補佐する CDP スクリプト。
+プリフロップをリアルタイムで補佐する CDP スクリプト。
 
 Chrome DevTools Protocol (CDP) でブラウザを外部から監視し、ハンド・ポジション・アクション状況を読み取って GTO レンジに基づくアドバイスをオーバーレイ表示する。CSP の制限を受けない。
 
@@ -50,7 +50,7 @@ mise install
   --user-data-dir=/tmp/chrome-cdp
 ```
 
-### 2. tenfour-poker.com を開いてテーブルに着席
+### 2. 対象ページ を開く
 
 ### 3. スクリプトを起動
 
