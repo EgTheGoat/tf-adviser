@@ -334,6 +334,13 @@ function buildInjectJS(hand, myPos, gto, rangeKey, vsLabel, isBBOption, alreadyA
     const t0 = Date.now();
     el._waitTurnId = setInterval(() => {
       if (Date.now() - t0 > 30000) { clearInterval(el._waitTurnId); el._waitTurnId = null; return; }
+      // 他プレイヤーのレイズバッジが出ていたら RFI シナリオでなくなった → 中止
+      const hasRaise = Array.from(document.querySelectorAll('.seat-anchor:not(.seat-anchor--bottom-center)'))
+        .some(seat => {
+          const badge = seat.querySelector('.seat-floating-layer .animate-action-pop');
+          return badge && /raise|all.?in/i.test(badge.textContent);
+        });
+      if (hasRaise) { clearInterval(el._waitTurnId); el._waitTurnId = null; return; }
       const actionBtn = Array.from(document.querySelectorAll('button'))
         .find(btn => !btn.closest('.seat-anchor') && /^(Fold|Call|Raise|Bet|Check)$/.test(btn.textContent.trim()));
       if (!actionBtn) return;
