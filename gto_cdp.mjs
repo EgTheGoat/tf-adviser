@@ -6,7 +6,7 @@
  *      /Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome \
  *        --remote-debugging-port=9222 --user-data-dir=/tmp/chrome-cdp
  *
- *   2. tenfour-poker.com を開く
+ *   2. 対象サイトを開く
  *
  *   3. このスクリプトを実行
  *      node gto_cdp.mjs
@@ -32,7 +32,7 @@ const ACTION_LABEL = { fold: 'フォールド', call: 'コール', raise: 'レ�
 const ACTION_COLOR = { fold: '#64748b', call: '#22c55e', raise: '#ef4444', raise_large: '#ef4444' };
 const CDP_HOST = 'localhost';
 const CDP_PORT = 9222;
-const TARGET_URL = 'tenfour-poker.com';
+const TARGET_URL = 'poker';
 const POLL_MS = 1500;
 
 // ============================================================
