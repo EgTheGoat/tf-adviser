@@ -32,7 +32,7 @@ const ACTION_LABEL = { fold: 'フォールド', call: 'コール', raise: 'レ�
 const ACTION_COLOR = { fold: '#64748b', call: '#22c55e', raise: '#ef4444', raise_large: '#ef4444' };
 const CDP_HOST = 'localhost';
 const CDP_PORT = 9222;
-const TARGET_URL = 'poker';
+const TARGET_URL = 'tenfour';
 const POLL_MS = 1500;
 
 // ============================================================
