@@ -249,7 +249,7 @@ function buildRangeChart(rangeKey, currentHand) {
       if (!hd || (hd.fold || 0) >= 0.999) {
         bg = '#1e293b';
       } else {
-        const rf = Math.round((hd.raise || 0) * 100);
+        const rf = Math.round(((hd.raise || 0) + (hd.raise_large || 0)) * 100);
         const cf = Math.round((hd.call || 0) * 100);
         bg = `linear-gradient(to bottom,#ef4444 ${rf}%,#22c55e ${rf}% ${rf+cf}%,#1e293b ${rf+cf}% 100%)`;
       }
