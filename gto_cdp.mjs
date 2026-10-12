@@ -319,13 +319,17 @@ function buildInjectJS(hand, myPos, gto, rangeKey, vsLabel, isBBOption, alreadyA
     fireKey('f', 'KeyF');
   }
 
-  // 前の waitTurn が残っていればキャンセル（シナリオ変化時に暴発しないよう）
-  if (el._waitTurnId) { clearInterval(el._waitTurnId); el._waitTurnId = null; }
-
   // autoKey をパネルに記録し、同一 hand+rangeKey では絶対に1回だけ発火
   const autoKey = ${JSON.stringify(hand + '|' + (rangeKey || ''))};
-  if (${shouldOpen} && el.dataset.autoFired !== autoKey) {
+
+  // シナリオが変わった時だけ waitTurn をキャンセル（同一シナリオ中は生かし続ける）
+  if (el._waitTurnId && el.dataset.waitTurnKey !== autoKey) {
+    clearInterval(el._waitTurnId); el._waitTurnId = null;
+  }
+
+  if (${shouldOpen} && el.dataset.autoFired !== autoKey && !el._waitTurnId) {
     el.dataset.autoFired = autoKey;
+    el.dataset.waitTurnKey = autoKey;
     // 自分のターン（Fold/Call/Raise ボタン出現）を待ってから 3 を押す
     const t0 = Date.now();
     el._waitTurnId = setInterval(() => {
