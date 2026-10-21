@@ -234,9 +234,10 @@ function injectStatusPanel(msg) {
 // レンジチャート（13×13グリッド）
 // ============================================================
 function buildRangeChart(rangeKey, currentHand) {
-  if (!rangeKey) return '';
+  if (!rangeKey || !RANGES[rangeKey]) {
+    return `<div style="font-size:13px;color:#475569;margin-bottom:12px;padding:8px 0">レンジデータなし（このシナリオは未収録）</div>`;
+  }
   const range = RANGES[rangeKey];
-  if (!range) return '';
   const CHART_RANKS = ['A','K','Q','J','T','9','8','7','6','5','4','3','2'];
   const lbl = r => `<div style="width:26px;height:16px;display:flex;align-items:center;justify-content:center;font-size:10px;color:#64748b;flex-shrink:0">${r}</div>`;
   const topRow = `<div style="display:flex;gap:1px;margin-left:21px">${CHART_RANKS.map(lbl).join('')}</div>`;
