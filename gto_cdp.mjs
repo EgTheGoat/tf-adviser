@@ -283,7 +283,7 @@ function buildInjectJS(hand, myPos, gto, rangeKey, vsLabel, isBBOption, alreadyA
     (HIGH.has(hand[0]) && HIGH.has(hand[1])) || /^AJ/.test(hand)
   );
   // fold 90%以上の時だけ自動フォールド（混合戦略・両方Q以上は手動）
-  const shouldFold = !isBBOption && !bothHigh && (!gto || (gto.best === 'fold' && (gto.freqs.fold ?? 0) >= 0.9));
+  const shouldFold = !isBBOption && !bothHigh && (!gto || (gto.best === 'fold' && (gto.freqs.fold ?? 0) >= 0.8));
   // RFIで raise 90%以上 → 1秒後に 3→Enter（一手に一度だけ）
   const isRFI = !!rangeKey?.startsWith('100bb_rfi_');
   const raiseFreq = (gto?.freqs.raise ?? 0) + (gto?.freqs.raise_large ?? 0);
