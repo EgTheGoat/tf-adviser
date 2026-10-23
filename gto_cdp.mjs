@@ -172,64 +172,57 @@ function createSession(wsUrl) {
 // ============================================================
 const READ_STATE_JS = `
 (function() {
-  const anchors = Array.from(document.querySelectorAll('.seat-anchor--bottom-center'));
-  if (anchors.length === 0) return [{ error: 'no anchor' }];
+  const anchor = document.querySelector('.seat-anchor--bottom-center');
+  if (!anchor) return { error: 'no anchor' };
 
-  return anchors.map(anchor => {
-    const tableArea = anchor.closest('.table-area') || anchor.parentElement;
-    const rect = tableArea.getBoundingClientRect();
-    const side = rect.left < window.innerWidth / 2 ? 'left' : 'right';
+  const posEl = anchor.querySelector('.bg-emerald-500');
+  const pos = posEl ? posEl.textContent.trim() : null;
 
-    const posEl = anchor.querySelector('.bg-emerald-500');
-    const pos = posEl ? posEl.textContent.trim() : null;
-
-    const stack = anchor.querySelector('.seat-card-stack');
-    const cards = [];
-    if (stack) {
-      stack.querySelectorAll('.animate-card-deal').forEach(wrap => {
-        const inner = wrap.querySelector('span[style*="background-color"]');
-        if (!inner) return;
-        const spans = inner.querySelectorAll('span');
-        let suitTxt = '', rankTxt = '';
-        spans.forEach(sp => {
-          const t = sp.textContent.trim();
-          if (/[♠♥♦♣]/.test(t)) suitTxt = t;
-          else if (/^([2-9TJQKA]|10)$/.test(t)) rankTxt = t;
-        });
-        if (suitTxt && rankTxt) cards.push({ suit: suitTxt, rank: rankTxt });
+  const stack = anchor.querySelector('.seat-card-stack');
+  const cards = [];
+  if (stack) {
+    stack.querySelectorAll('.animate-card-deal').forEach(wrap => {
+      const inner = wrap.querySelector('span[style*="background-color"]');
+      if (!inner) return;
+      const spans = inner.querySelectorAll('span');
+      let suitTxt = '', rankTxt = '';
+      spans.forEach(sp => {
+        const t = sp.textContent.trim();
+        if (/[♠♥♦♣]/.test(t)) suitTxt = t;
+        else if (/^([2-9TJQKA]|10)$/.test(t)) rankTxt = t;
       });
-    }
-
-    const badges = [];
-    tableArea.querySelectorAll('.seat-anchor:not(.seat-anchor--bottom-center)').forEach(seat => {
-      const badge = seat.querySelector('.seat-floating-layer .animate-action-pop');
-      const p2 = seat.querySelector('.bg-emerald-500');
-      if (badge && p2) {
-        badges.push({ pos: p2.textContent.trim().toUpperCase(), text: badge.textContent.trim() });
-      }
+      if (suitTxt && rankTxt) cards.push({ suit: suitTxt, rank: rankTxt });
     });
+  }
 
-    const boardCards = tableArea.querySelectorAll('.table-center span[style*="background-color"]');
-    const isPostflop = boardCards.length >= 3;
-
-    return { pos, cards, badges, isPostflop, side };
+  const badges = [];
+  document.querySelectorAll('.seat-anchor:not(.seat-anchor--bottom-center)').forEach(seat => {
+    const badge = seat.querySelector('.seat-floating-layer .animate-action-pop');
+    const p2 = seat.querySelector('.bg-emerald-500');
+    if (badge && p2) {
+      badges.push({ pos: p2.textContent.trim().toUpperCase(), text: badge.textContent.trim() });
+    }
   });
+
+  // コミュニティカードが3枚以上出ていたらフロップ以降（誤検知防止で>=3）
+  const boardCards = document.querySelectorAll('.table-center span[style*="background-color"]');
+  const isPostflop = boardCards.length >= 3;
+
+  return { pos, cards, badges, isPostflop };
 })()
 `;
 
 // ============================================================
 // ステータスパネル（待機中など）
 // ============================================================
-function injectStatusPanel(msg, side = 'right') {
-  const panelId = `gto-cdp-panel-${side}`;
-  const hPos = side === 'left' ? 'left:12px' : 'right:12px';
+function injectStatusPanel(msg) {
   return `(function() {
-  let el = document.getElementById(${JSON.stringify(panelId)});
+  let el = document.getElementById('gto-cdp-panel');
   if (!el) {
     el = document.createElement('div');
-    el.id = ${JSON.stringify(panelId)};
+    el.id = 'gto-cdp-panel';
     el.style.cssText = [
-      'position:fixed','bottom:12px',${JSON.stringify(hPos)},
+      'position:fixed','bottom:12px','right:12px',
       'z-index:2147483647',
       'background:rgba(3,7,18,0.93)',
       'border:1px solid rgba(255,255,255,0.18)',
@@ -281,7 +274,7 @@ function buildRangeChart(rangeKey, currentHand) {
 // ============================================================
 // オーバーレイ注入（CDP経由）
 // ============================================================
-function buildInjectJS(hand, myPos, gto, rangeKey, vsLabel, isBBOption, alreadyActed = false, pickedAction = null, side = 'right') {
+function buildInjectJS(hand, myPos, gto, rangeKey, vsLabel, isBBOption, alreadyActed = false, pickedAction = null) {
   const chartHtml = buildRangeChart(rangeKey, hand);
   const subline = `<div style="font-size:16px;color:#64748b;margin-bottom:6px">${myPos}${vsLabel ? ' · ' + vsLabel : ''}</div>`;
   const defaultAction = isBBOption
@@ -304,19 +297,14 @@ function buildInjectJS(hand, myPos, gto, rangeKey, vsLabel, isBBOption, alreadyA
   const shouldFoldOnce = !isBBOption && !bothHigh && chosen === 'fold';
   const shouldOpen = !alreadyActed && isRFI && /^raise/.test(chosen);
 
-  const _panelId = `gto-cdp-panel-${side}`;
-  const _hPos = side === 'left' ? 'left:12px' : 'right:12px';
-
   return `
 (function() {
-  const panelId = ${JSON.stringify('gto-cdp-panel-' + side)};
-  const hPos = ${JSON.stringify(side === 'left' ? 'left:12px' : 'right:12px')};
-  let el = document.getElementById(panelId);
+  let el = document.getElementById('gto-cdp-panel');
   if (!el) {
     el = document.createElement('div');
-    el.id = panelId;
+    el.id = 'gto-cdp-panel';
     el.style.cssText = [
-      'position:fixed','bottom:12px',hPos,
+      'position:fixed','bottom:12px','right:12px',
       'z-index:2147483647',
       'background:rgba(3,7,18,0.93)',
       'border:1px solid rgba(255,255,255,0.18)',
@@ -412,74 +400,9 @@ function buildContent(hand, myPos, gto, vsLabel) {
 // ============================================================
 // MAIN
 // ============================================================
-// テーブルごとに状態を管理（side: 'left' | 'right'）
-const tableStates = {
-  left:  { lastHand: null, lastAutoKey: null, lastPickedAction: null },
-  right: { lastHand: null, lastAutoKey: null, lastPickedAction: null },
-};
-
-async function pollTable(session, state) {
-  const side = state.side ?? 'right';
-  const ts = tableStates[side] ?? tableStates.right;
-
-  if (state.error) {
-    await session.send('Runtime.evaluate', { expression: injectStatusPanel('⏳ テーブル待機中', side), returnByValue: false });
-    return;
-  }
-
-  if (state.isPostflop) return;
-
-  const { pos, cards, badges } = state;
-  if (!pos || cards.length < 2) {
-    await session.send('Runtime.evaluate', { expression: injectStatusPanel('⏳ カード待機中', side), returnByValue: false });
-    return;
-  }
-
-  const [c1, c2] = cards;
-  const s1 = normSuit(c1.suit), s2 = normSuit(c2.suit);
-  const r1 = normRank(c1.rank), r2 = normRank(c2.rank);
-  if (!s1 || !s2) return;
-
-  const hand = toHandKey(r1, s1, r2, s2);
-  const PF_ORDER = ['UTG','HJ','MP','CO','BTN','SB','BB'];
-  const raises = badges
-    .filter(b => /raise|all.?in/i.test(b.text))
-    .map(b => ({ pos: b.pos }))
-    .sort((a, b) => PF_ORDER.indexOf(a.pos) - PF_ORDER.indexOf(b.pos));
-
-  const rangeKey = getRangeKey(pos.toUpperCase(), raises);
-  const gto = rangeKey ? lookupGTO(hand, rangeKey) : null;
-
-  const isBBOption = pos.toUpperCase() === 'BB' && raises.length === 0;
-  const vsLabel = isBBOption ? 'BB オプション'
-    : raises.length === 0 ? 'RFI'
-    : raises.length === 1 ? `vs ${raises[0].pos}`
-    : raises.length === 2 ? `vs ${raises[0].pos} open / ${raises[1].pos} 3bet`
-    : `vs ${raises[1].pos} 3bet / ${raises[2].pos} 4bet`;
-
-  const autoKey = `${hand}|${rangeKey}`;
-  if (hand !== ts.lastHand) {
-    ts.lastHand = hand;
-    ts.lastAutoKey = null;
-    ts.lastPickedAction = null;
-  }
-  if (ts.lastAutoKey !== autoKey) {
-    ts.lastAutoKey = autoKey;
-    ts.lastPickedAction = gto ? pickAction(gto.freqs) : 'fold';
-    const rec = gto ? `${ACTION_LABEL[gto.best]} (${Math.round((gto.freqs[gto.best] || 0) * 100)}%) → 抽選: ${ACTION_LABEL[ts.lastPickedAction] || ts.lastPickedAction}` : 'フォールド';
-    console.log(`\n[${side}][${pos}] ${hand} ${vsLabel} → ${rec}`);
-    if (gto) {
-      for (const [act, freq] of Object.entries(gto.freqs).sort((a,b)=>b[1]-a[1])) {
-        console.log(`  ${(ACTION_LABEL[act]||act).padEnd(12)} ${Math.round(freq*100)}%`);
-      }
-    }
-  }
-
-  await session.send('Runtime.evaluate', {
-    expression: buildInjectJS(hand, pos.toUpperCase(), gto, rangeKey, vsLabel, isBBOption, false, ts.lastPickedAction, side),
-    returnByValue: false,
-  });
-}
+let lastHand = null;
+let lastAutoKey = null;
+let lastPickedAction = null;
 
 async function poll(session) {
   try {
@@ -489,14 +412,76 @@ async function poll(session) {
       awaitPromise: false,
     });
 
-    const states = result?.result?.value;
-    if (!Array.isArray(states) || states.length === 0) {
-      process.stdout.write(`\r⏳ テーブル待機中...   `);
-      await session.send('Runtime.evaluate', { expression: injectStatusPanel('⏳ テーブル待機中', 'right'), returnByValue: false });
+    const state = result?.result?.value;
+    if (!state || state.error) {
+      process.stdout.write(`\r⏳ テーブル待機中... (${state?.error || 'no state'})   `);
+      await session.send('Runtime.evaluate', { expression: injectStatusPanel('⏳ テーブル待機中'), returnByValue: false });
       return;
     }
 
-    await Promise.all(states.map(state => pollTable(session, state)));
+    // フロップ以降は処理停止（パネルはそのまま）
+    if (state.isPostflop) {
+      process.stdout.write(`\r🂠 フロップ以降 - 停止中   `);
+      return;
+    }
+
+    const { pos, cards, badges } = state;
+    if (!pos || cards.length < 2) {
+      process.stdout.write(`\r⏳ カード待機中... pos=${pos} cards=${cards?.length}   `);
+      await session.send('Runtime.evaluate', { expression: injectStatusPanel('⏳ カード待機中'), returnByValue: false });
+      return;
+    }
+
+    const [c1, c2] = cards;
+    const s1 = normSuit(c1.suit), s2 = normSuit(c2.suit);
+    const r1 = normRank(c1.rank), r2 = normRank(c2.rank);
+    if (!s1 || !s2) { process.stdout.write(`\rスート読み取り失敗: ${JSON.stringify(cards)}   `); return; }
+
+    const hand = toHandKey(r1, s1, r2, s2);
+    const PF_ORDER = ['UTG','HJ','MP','CO','BTN','SB','BB'];
+    const raises = badges
+      .filter(b => /raise|all.?in/i.test(b.text))
+      .map(b => ({ pos: b.pos }))
+      .sort((a, b) => PF_ORDER.indexOf(a.pos) - PF_ORDER.indexOf(b.pos));
+
+    const rangeKey = getRangeKey(pos.toUpperCase(), raises);
+    const gto = rangeKey ? lookupGTO(hand, rangeKey) : null;
+
+    // vs表示ラベル
+    const isBBOption = pos.toUpperCase() === 'BB' && raises.length === 0;
+    const vsLabel = isBBOption ? 'BB オプション'
+      : raises.length === 0 ? 'RFI'
+      : raises.length === 1 ? `vs ${raises[0].pos}`
+      : raises.length === 2 ? `vs ${raises[0].pos} open / ${raises[1].pos} 3bet`
+      : `vs ${raises[1].pos} 3bet / ${raises[2].pos} 4bet`;
+
+    // ハンドが変わったら抽選しなおす
+    const autoKey = `${hand}|${rangeKey}`;
+    if (hand !== lastHand) {
+      lastHand = hand;
+      lastAutoKey = null;
+      lastPickedAction = null;
+    }
+    if (lastAutoKey !== autoKey) {
+      lastAutoKey = autoKey;
+      lastPickedAction = gto ? pickAction(gto.freqs) : 'fold';
+      const rec = gto ? `${ACTION_LABEL[gto.best]} (${Math.round((gto.freqs[gto.best] || 0) * 100)}%) → 抽選: ${ACTION_LABEL[lastPickedAction] || lastPickedAction}` : 'フォールド';
+      console.log(`\n[${pos}] ${hand} ${vsLabel} → ${rec}`);
+      if (gto) {
+        for (const [act, freq] of Object.entries(gto.freqs).sort((a,b)=>b[1]-a[1])) {
+          console.log(`  ${(ACTION_LABEL[act]||act).padEnd(12)} ${Math.round(freq*100)}%`);
+        }
+      }
+    }
+
+    const alreadyActed = false; // 抽選結果はブラウザDOM側で管理
+
+    // ページにオーバーレイ注入
+    await session.send('Runtime.evaluate', {
+      expression: buildInjectJS(hand, pos.toUpperCase(), gto, rangeKey, vsLabel, isBBOption, alreadyActed, lastPickedAction),
+      returnByValue: false,
+    });
+
   } catch (e) {
     process.stdout.write(`\rエラー: ${e.message}   `);
   }
