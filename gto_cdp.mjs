@@ -107,6 +107,15 @@ function getRangeKey(myPos, raises) {
   return null;
 }
 
+function pickAction(freqs) {
+  let r = Math.random();
+  for (const [act, f] of Object.entries(freqs).sort((a, b) => b[1] - a[1])) {
+    r -= f;
+    if (r <= 0) return act;
+  }
+  return Object.keys(freqs)[0];
+}
+
 function lookupGTO(hand, rangeKey) {
   const range = RANGES[rangeKey];
   if (!range) return null;
@@ -265,7 +274,7 @@ function buildRangeChart(rangeKey, currentHand) {
 // ============================================================
 // オーバーレイ注入（CDP経由）
 // ============================================================
-function buildInjectJS(hand, myPos, gto, rangeKey, vsLabel, isBBOption, alreadyActed = false) {
+function buildInjectJS(hand, myPos, gto, rangeKey, vsLabel, isBBOption, alreadyActed = false, pickedAction = null) {
   const chartHtml = buildRangeChart(rangeKey, hand);
   const subline = `<div style="font-size:16px;color:#64748b;margin-bottom:6px">${myPos}${vsLabel ? ' · ' + vsLabel : ''}</div>`;
   const defaultAction = isBBOption
@@ -277,18 +286,16 @@ function buildInjectJS(hand, myPos, gto, rangeKey, vsLabel, isBBOption, alreadyA
        <div style="font-size:30px;font-weight:800;margin-bottom:8px">${hand || '??'}</div>
        ${defaultAction}`;
 
-  // Q以上ペア/コンボ + AJ系は手動
+  // Q以上ペア/コンボ + AJ系は常に手動
   const HIGH = new Set(['Q','K','A']);
   const bothHigh = hand.length >= 2 && (
     (HIGH.has(hand[0]) && HIGH.has(hand[1])) || /^AJ/.test(hand)
   );
-  // fold 80%以上の時だけ自動フォールド（混合戦略・両方Q以上・AJ系は手動）
-  const shouldFold = !isBBOption && !bothHigh && (!gto || (gto.best === 'fold' && (gto.freqs.fold ?? 0) >= 0.8));
-  // RFIで raise 90%以上 → 1秒後に 3→Enter（一手に一度だけ）
+  // 乱数で選ばれたアクション（なければGTOのbest）で自動実行
+  const chosen = pickedAction ?? (gto ? gto.best : 'fold');
   const isRFI = !!rangeKey?.startsWith('100bb_rfi_');
-  const raiseFreq = (gto?.freqs.raise ?? 0) + (gto?.freqs.raise_large ?? 0);
-  const shouldOpen = !alreadyActed && isRFI && !!gto && /^raise/.test(gto.best) && raiseFreq >= 0.9;
-  const shouldFoldOnce = !alreadyActed && shouldFold;
+  const shouldFoldOnce = !isBBOption && !bothHigh && chosen === 'fold';
+  const shouldOpen = !alreadyActed && isRFI && /^raise/.test(chosen);
 
   return `
 (function() {
@@ -394,7 +401,8 @@ function buildContent(hand, myPos, gto, vsLabel) {
 // MAIN
 // ============================================================
 let lastHand = null;
-let lastAutoKey = null; // 自動アクション発火済みキー（hand+rangeKey）
+let lastAutoKey = null;
+let lastPickedAction = null;
 
 async function poll(session) {
   try {
@@ -447,12 +455,17 @@ async function poll(session) {
       : raises.length === 2 ? `vs ${raises[0].pos} open / ${raises[1].pos} 3bet`
       : `vs ${raises[1].pos} 3bet / ${raises[2].pos} 4bet`;
 
-    // ハンドが変わったら自動アクション済みフラグをリセット
+    // ハンドが変わったら抽選しなおす
     const autoKey = `${hand}|${rangeKey}`;
     if (hand !== lastHand) {
       lastHand = hand;
       lastAutoKey = null;
-      const rec = gto ? `${ACTION_LABEL[gto.best]} (${Math.round((gto.freqs[gto.best] || 0) * 100)}%)` : 'フォールド';
+      lastPickedAction = null;
+    }
+    if (lastAutoKey !== autoKey) {
+      lastAutoKey = autoKey;
+      lastPickedAction = gto ? pickAction(gto.freqs) : 'fold';
+      const rec = gto ? `${ACTION_LABEL[gto.best]} (${Math.round((gto.freqs[gto.best] || 0) * 100)}%) → 抽選: ${ACTION_LABEL[lastPickedAction] || lastPickedAction}` : 'フォールド';
       console.log(`\n[${pos}] ${hand} ${vsLabel} → ${rec}`);
       if (gto) {
         for (const [act, freq] of Object.entries(gto.freqs).sort((a,b)=>b[1]-a[1])) {
@@ -461,13 +474,11 @@ async function poll(session) {
       }
     }
 
-    // 自動アクションは同一hand+rangeKeyで一度だけ
-    const alreadyActed = lastAutoKey === autoKey;
-    if (!alreadyActed) lastAutoKey = autoKey;
+    const alreadyActed = false; // 抽選結果はブラウザDOM側で管理
 
     // ページにオーバーレイ注入
     await session.send('Runtime.evaluate', {
-      expression: buildInjectJS(hand, pos.toUpperCase(), gto, rangeKey, vsLabel, isBBOption, alreadyActed),
+      expression: buildInjectJS(hand, pos.toUpperCase(), gto, rangeKey, vsLabel, isBBOption, alreadyActed, lastPickedAction),
       returnByValue: false,
     });
 
