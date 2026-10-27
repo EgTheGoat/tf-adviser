@@ -464,13 +464,13 @@ async function poll(session) {
       flopSoundFired = false;
     }
 
-    // false→true のエッジでのみスケジュール（常時 true の誤検知を防ぐ）
-    if (state.hasTurn && !lastHasTurn) scheduleTurnSound(autoKey, session);
-    lastHasTurn = state.hasTurn;
-
     if (lastAutoKey !== autoKey) {
       lastAutoKey = autoKey;
       lastPickedAction = gto ? pickAction(gto.freqs) : 'fold';
+      // シナリオ変化時はターン検知をリセット（BBオプション→レイズ対応 等）
+      cancelTurnSound();
+      turnSoundFiredForHand = null;
+      lastHasTurn = false;
       const rec = gto ? `${ACTION_LABEL[gto.best]} (${Math.round((gto.freqs[gto.best] || 0) * 100)}%) → 抽選: ${ACTION_LABEL[lastPickedAction] || lastPickedAction}` : 'フォールド';
       console.log(`\n[${pos}] ${hand} ${vsLabel} → ${rec}`);
       if (gto) {
@@ -479,6 +479,10 @@ async function poll(session) {
         }
       }
     }
+
+    // false→true のエッジでのみスケジュール（常時 true の誤検知を防ぐ）
+    if (state.hasTurn && !lastHasTurn) scheduleTurnSound(autoKey, session);
+    lastHasTurn = state.hasTurn;
 
     const HIGH = new Set(['Q','K','A']);
     const bothHigh = hand.length >= 2 && ((HIGH.has(hand[0]) && HIGH.has(hand[1])) || /^AJ/.test(hand));
