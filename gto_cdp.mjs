@@ -316,6 +316,62 @@ function buildInjectJS(hand, myPos, gto, rangeKey, vsLabel, isBBOption, alreadyA
       'user-select:none','pointer-events:none',
     ].join(';');
     document.body.appendChild(el);
+
+    // ---- 初回のみ: サイト音声を無効化 & 通知音セットアップ ----
+    // HTML5 Audio を無音化
+    HTMLAudioElement.prototype.play = function() { return Promise.resolve(); };
+    // Web Audio API をミュート（オリジナルは GTO 通知音用に保存）
+    const _OrigCtx = window.AudioContext || window.webkitAudioContext;
+    window._gtoAudioCtx = _OrigCtx;
+    window.AudioContext = window.webkitAudioContext = new Proxy(_OrigCtx, {
+      construct(Target, args) {
+        const ctx = new Target(...args);
+        const mute = ctx.createGain();
+        mute.gain.value = 0;
+        const _origConnect = ctx.destination;
+        ctx._muteGain = mute;
+        mute.connect(_origConnect);
+        const origCreate = ctx.createBufferSource.bind(ctx);
+        ctx.createBufferSource = function() {
+          const src = origCreate();
+          const origSrcConnect = src.connect.bind(src);
+          src.connect = function(dest, ...rest) {
+            return origSrcConnect(mute, ...rest);
+          };
+          return src;
+        };
+        return ctx;
+      }
+    });
+    // GTO ターン通知音（オリジナル AudioContext を使う）
+    window._gtoBeep = function() {
+      try {
+        const ctx = new window._gtoAudioCtx();
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.type = 'sine';
+        osc.frequency.value = 880;
+        gain.gain.setValueAtTime(0.4, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.4);
+        osc.start(ctx.currentTime);
+        osc.stop(ctx.currentTime + 0.4);
+      } catch(e) {}
+    };
+
+    // ターン監視（2秒後に通知音）
+    el._turnNotified = false;
+    el._turnWatcherId = setInterval(() => {
+      const hasTurn = Array.from(document.querySelectorAll('button'))
+        .some(btn => !btn.closest('.seat-anchor') && /^(Fold|Call|Raise|Bet|Check)$/.test(btn.textContent.trim()));
+      if (hasTurn && !el._turnNotified) {
+        el._turnNotified = true;
+        setTimeout(() => { if (window._gtoBeep) window._gtoBeep(); }, 2000);
+      } else if (!hasTurn) {
+        el._turnNotified = false;
+      }
+    }, 200);
   }
   el.innerHTML = ${JSON.stringify(content)};
 
