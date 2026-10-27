@@ -365,6 +365,8 @@ let foldFiredForKey = null;
 // open state machine
 let openState = 'idle'; // 'idle' | 'pressed_3' | 'done'
 let openForKey = null;
+// フロップ初回ターン通知
+let flopSoundFired = false;
 
 function playTurnSound() {
   spawn('afplay', ['/System/Library/Sounds/Ping.aiff'], { stdio: 'ignore' });
@@ -408,6 +410,12 @@ async function poll(session) {
     // フロップ以降は処理停止（パネルはそのまま）
     if (state.isPostflop) {
       process.stdout.write(`\r🂠 フロップ以降 - 停止中   `);
+      // フロップ初回ターンのみ通知音
+      if (!flopSoundFired && state.hasTurn && !lastHasTurn) {
+        flopSoundFired = true;
+        scheduleTurnSound('flop|' + (lastHand || ''), session);
+      }
+      lastHasTurn = state.hasTurn;
       return;
     }
 
@@ -453,6 +461,7 @@ async function poll(session) {
       cancelTurnSound();
       turnSoundFiredForHand = null;
       lastHasTurn = false;
+      flopSoundFired = false;
     }
 
     // false→true のエッジでのみスケジュール（常時 true の誤検知を防ぐ）
