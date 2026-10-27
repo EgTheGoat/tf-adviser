@@ -28,6 +28,9 @@ const RANGES = require('./gto_ranges_bundle.json');
 // ============================================================
 // CONSTANTS
 // ============================================================
+const ts = () => new Date().toTimeString().slice(0, 8);
+const log = (...args) => console.log(`[${ts()}]`, ...args);
+
 const RANK_ORDER = ['2','3','4','5','6','7','8','9','T','J','Q','K','A'];
 const ACTION_LABEL = { fold: 'フォールド', call: 'コール', raise: 'レイズ/3bet', raise_large: 'レイズ(3bb)' };
 const ACTION_COLOR = { fold: '#64748b', call: '#22c55e', raise: '#ef4444', raise_large: '#ef4444' };
@@ -365,6 +368,7 @@ let foldFiredForKey = null;
 // open state machine
 let openState = 'idle'; // 'idle' | 'pressed_3' | 'done'
 let openForKey = null;
+let openPressedAt = 0;
 // フロップ初回ターン通知
 let flopSoundFired = false;
 
@@ -383,7 +387,8 @@ function scheduleTurnSound(handKey, session) {
         expression: `Array.from(document.querySelectorAll('button')).some(btn => !btn.closest('.seat-anchor') && /^(Fold|Call|Raise|Bet|Check)$/.test(btn.textContent.trim()))`,
         returnByValue: true,
       });
-      if (r?.result?.value === true) playTurnSound();
+      if (r?.result?.value === true) { playTurnSound(); log('  [音] 発火'); }
+      else { log('  [音] キャンセル（アクション済み）'); }
     } catch(e) {}
   }, 2500);
 }
@@ -472,16 +477,19 @@ async function poll(session) {
       turnSoundFiredForHand = null;
       lastHasTurn = false;
       const rec = gto ? `${ACTION_LABEL[gto.best]} (${Math.round((gto.freqs[gto.best] || 0) * 100)}%) → 抽選: ${ACTION_LABEL[lastPickedAction] || lastPickedAction}` : 'フォールド';
-      console.log(`\n[${pos}] ${hand} ${vsLabel} → ${rec}`);
+      log(`\n[${pos}] ${hand} ${vsLabel} → ${rec}`);
       if (gto) {
         for (const [act, freq] of Object.entries(gto.freqs).sort((a,b)=>b[1]-a[1])) {
-          console.log(`  ${(ACTION_LABEL[act]||act).padEnd(12)} ${Math.round(freq*100)}%`);
+          log(`  ${(ACTION_LABEL[act]||act).padEnd(12)} ${Math.round(freq*100)}%`);
         }
       }
     }
 
     // false→true のエッジでのみスケジュール（常時 true の誤検知を防ぐ）
-    if (state.hasTurn && !lastHasTurn) scheduleTurnSound(autoKey, session);
+    if (state.hasTurn && !lastHasTurn) {
+      log(`  [音] ターン検知 → スケジュール (hasTurn=${state.hasTurn} lastHasTurn=${lastHasTurn})`);
+      scheduleTurnSound(autoKey, session);
+    }
     lastHasTurn = state.hasTurn;
 
     const HIGH = new Set(['Q','K','A']);
@@ -497,7 +505,7 @@ async function poll(session) {
     if (shouldFoldOnce && foldFiredForKey !== autoKey) {
       foldFiredForKey = autoKey;
       await cdpKey(session, 'f', 'KeyF', 70, 'f');
-      console.log(`  → 自動フォールド発火`);
+      log(`  → 自動フォールド発火`);
     }
 
     // 自動 open（RFI のみ）
@@ -505,15 +513,15 @@ async function poll(session) {
       if (openForKey !== autoKey) { openState = 'idle'; openForKey = autoKey; }
 
       if (openState === 'idle' && state.hasTurn && raises.length === 0) {
-        openState = 'pressed_3';
-        await cdpKey(session, '3', 'Digit3', 51, '3');
-        console.log(`  → '3' 発火`);
-      } else if (openState === 'pressed_3' && state.hasBetSize) {
         openState = 'done';
+        await cdpKey(session, '3', 'Digit3', 51, '3');
+        log(`  → '3' 発火`);
+        // セッションをキャプチャして 1.5 秒後に Enter
+        const _sess = session;
         setTimeout(async () => {
-          await cdpKey(session, 'Enter', 'Enter', 13).catch(() => {});
-          console.log(`  → Enter 発火`);
-        }, 500);
+          await cdpKey(_sess, 'Enter', 'Enter', 13).catch(() => {});
+          log(`  → Enter 発火`);
+        }, 1500);
       }
     } else {
       // RFI でなくなった（他のレイズが入った等）→ リセット
@@ -534,9 +542,9 @@ async function poll(session) {
 }
 
 async function main() {
-  console.log('🃏 Preflop GTO Advisor (CDP mode)');
-  console.log(`📡 Chrome CDP: http://${CDP_HOST}:${CDP_PORT}`);
-  console.log('');
+  log('🃏 Preflop GTO Advisor (CDP mode)');
+  log(`📡 Chrome CDP: http://${CDP_HOST}:${CDP_PORT}`);
+  log('');
 
   let session = null;
   let timer = null;
@@ -551,9 +559,17 @@ async function main() {
         return;
       }
 
-      if (session) { try { session.close(); } catch {} }
+      // 既存セッションが生きていれば再接続しない
+      if (session) {
+        try {
+          await session.send('Runtime.evaluate', { expression: '1', returnByValue: true });
+          return;
+        } catch {
+          try { session.close(); } catch {}
+        }
+      }
       session = await createSession(target.webSocketDebuggerUrl);
-      console.log(`\n✅ 接続: ${target.url}`);
+      log(`\n✅ 接続: ${target.url}`);
 
       if (timer) clearInterval(timer);
       timer = setInterval(() => poll(session), POLL_MS);
