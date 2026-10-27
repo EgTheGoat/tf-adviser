@@ -513,7 +513,7 @@ async function poll(session) {
         setTimeout(async () => {
           await cdpKey(session, 'Enter', 'Enter', 13).catch(() => {});
           console.log(`  → Enter 発火`);
-        }, 300);
+        }, 500);
       }
     } else {
       // RFI でなくなった（他のレイズが入った等）→ リセット
