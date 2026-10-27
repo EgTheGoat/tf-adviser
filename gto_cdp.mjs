@@ -15,6 +15,7 @@
 import { createRequire } from 'module';
 import { fileURLToPath } from 'url';
 import path from 'path';
+import { spawn } from 'child_process';
 
 const require = createRequire(import.meta.url);
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -208,7 +209,13 @@ const READ_STATE_JS = `
   const boardCards = document.querySelectorAll('.table-center span[style*="background-color"]');
   const isPostflop = boardCards.length >= 3;
 
-  return { pos, cards, badges, isPostflop };
+  const hasTurn = Array.from(document.querySelectorAll('button'))
+    .some(btn => !btn.closest('.seat-anchor') && /^(Fold|Call|Raise|Bet|Check)$/.test(btn.textContent.trim()));
+
+  const hasBetSize = Array.from(document.querySelectorAll('*'))
+    .some(el => el.childElementCount === 0 && /^(2\.5|3)(bb)?$/i.test(el.textContent.trim()));
+
+  return { pos, cards, badges, isPostflop, hasTurn, hasBetSize };
 })()
 `;
 
@@ -274,7 +281,7 @@ function buildRangeChart(rangeKey, currentHand) {
 // ============================================================
 // オーバーレイ注入（CDP経由）
 // ============================================================
-function buildInjectJS(hand, myPos, gto, rangeKey, vsLabel, isBBOption, alreadyActed = false, pickedAction = null) {
+function buildInjectJS(hand, myPos, gto, rangeKey, vsLabel, isBBOption) {
   const chartHtml = buildRangeChart(rangeKey, hand);
   const subline = `<div style="font-size:16px;color:#64748b;margin-bottom:6px">${myPos}${vsLabel ? ' · ' + vsLabel : ''}</div>`;
   const defaultAction = isBBOption
@@ -285,17 +292,6 @@ function buildInjectJS(hand, myPos, gto, rangeKey, vsLabel, isBBOption, alreadyA
     : `${chartHtml}${subline}
        <div style="font-size:30px;font-weight:800;margin-bottom:8px">${hand || '??'}</div>
        ${defaultAction}`;
-
-  // Q以上ペア/コンボ + AJ系は常に手動
-  const HIGH = new Set(['Q','K','A']);
-  const bothHigh = hand.length >= 2 && (
-    (HIGH.has(hand[0]) && HIGH.has(hand[1])) || /^AJ/.test(hand)
-  );
-  // 乱数で選ばれたアクション（なければGTOのbest）で自動実行
-  const chosen = pickedAction ?? (gto ? gto.best : 'fold');
-  const isRFI = !!rangeKey?.startsWith('100bb_rfi_');
-  const shouldFoldOnce = !isBBOption && !bothHigh && chosen === 'fold';
-  const shouldOpen = !alreadyActed && isRFI && /^raise/.test(chosen);
 
   return `
 (function() {
@@ -316,60 +312,8 @@ function buildInjectJS(hand, myPos, gto, rangeKey, vsLabel, isBBOption, alreadyA
       'user-select:none','pointer-events:none',
     ].join(';');
     document.body.appendChild(el);
-
   }
   el.innerHTML = ${JSON.stringify(content)};
-
-  const fireKey = (key, code) => {
-    ['keydown','keypress','keyup'].forEach(type => {
-      document.dispatchEvent(new KeyboardEvent(type, { key, code, bubbles: true, cancelable: true }));
-    });
-  };
-
-  if (${shouldFoldOnce}) {
-    fireKey('f', 'KeyF');
-  }
-
-  // autoKey をパネルに記録し、同一 hand+rangeKey では絶対に1回だけ発火
-  const autoKey = ${JSON.stringify(hand + '|' + (rangeKey || ''))};
-
-  // シナリオが変わった時だけ waitTurn をキャンセル（同一シナリオ中は生かし続ける）
-  if (el._waitTurnId && el.dataset.waitTurnKey !== autoKey) {
-    clearInterval(el._waitTurnId); el._waitTurnId = null;
-  }
-
-  if (${shouldOpen} && el.dataset.autoFired !== autoKey && !el._waitTurnId) {
-    el.dataset.autoFired = autoKey;
-    el.dataset.waitTurnKey = autoKey;
-    // 自分のターン（Fold/Call/Raise ボタン出現）を待ってから 3 を押す
-    const t0 = Date.now();
-    el._waitTurnId = setInterval(() => {
-      if (Date.now() - t0 > 30000) { clearInterval(el._waitTurnId); el._waitTurnId = null; return; }
-      // 他プレイヤーのレイズバッジが出ていたら RFI シナリオでなくなった → 中止
-      const hasRaise = Array.from(document.querySelectorAll('.seat-anchor:not(.seat-anchor--bottom-center)'))
-        .some(seat => {
-          const badge = seat.querySelector('.seat-floating-layer .animate-action-pop');
-          return badge && /raise|all.?in/i.test(badge.textContent);
-        });
-      if (hasRaise) { clearInterval(el._waitTurnId); el._waitTurnId = null; return; }
-      const actionBtn = Array.from(document.querySelectorAll('button'))
-        .find(btn => !btn.closest('.seat-anchor') && /^(Fold|Call|Raise|Bet|Check)$/.test(btn.textContent.trim()));
-      if (!actionBtn) return;
-      clearInterval(el._waitTurnId); el._waitTurnId = null;
-      fireKey('3', 'Digit3');
-      // 2.5bb/3bb 表示を検知してから 1 秒待って Enter
-      const t1 = Date.now();
-      const waitFor25 = setInterval(() => {
-        if (Date.now() - t1 > 6000) { clearInterval(waitFor25); return; }
-        const has25 = Array.from(document.querySelectorAll('*'))
-          .some(el => el.childElementCount === 0 && /^(2\.5|3)(bb)?$/i.test(el.textContent.trim()));
-        if (has25) {
-          clearInterval(waitFor25);
-          setTimeout(() => fireKey('Enter', 'Enter'), 1000);
-        }
-      }, 100);
-    }, 100);
-  }
 })()`;
 }
 
@@ -401,9 +345,50 @@ function buildContent(hand, myPos, gto, vsLabel) {
 // ============================================================
 // MAIN
 // ============================================================
+// CDP trusted key event（フォーカス不要）
+async function cdpKey(session, key, code, vk, text = '') {
+  const base = { key, code, windowsVirtualKeyCode: vk, nativeVirtualKeyCode: vk, modifiers: 0 };
+  await session.send('Input.dispatchKeyEvent', { ...base, type: 'rawKeyDown' });
+  if (text) await session.send('Input.dispatchKeyEvent', { ...base, type: 'char', text });
+  await session.send('Input.dispatchKeyEvent', { ...base, type: 'keyUp' });
+}
+
 let lastHand = null;
 let lastAutoKey = null;
 let lastPickedAction = null;
+let turnSoundTimer = null;
+let turnSoundFiredForHand = null;
+let lastHasTurn = false;
+
+// fold dedup
+let foldFiredForKey = null;
+// open state machine
+let openState = 'idle'; // 'idle' | 'pressed_3' | 'done'
+let openForKey = null;
+
+function playTurnSound() {
+  spawn('afplay', ['/System/Library/Sounds/Ping.aiff'], { stdio: 'ignore' });
+}
+
+function scheduleTurnSound(handKey, session) {
+  if (turnSoundFiredForHand === handKey) return;
+  if (turnSoundTimer) { clearTimeout(turnSoundTimer); turnSoundTimer = null; }
+  turnSoundFiredForHand = handKey;
+  turnSoundTimer = setTimeout(async () => {
+    try {
+      // 発火時点の DOM を直接確認（ポーリングの遅延を受けない）
+      const r = await session.send('Runtime.evaluate', {
+        expression: `Array.from(document.querySelectorAll('button')).some(btn => !btn.closest('.seat-anchor') && /^(Fold|Call|Raise|Bet|Check)$/.test(btn.textContent.trim()))`,
+        returnByValue: true,
+      });
+      if (r?.result?.value === true) playTurnSound();
+    } catch(e) {}
+  }, 2000);
+}
+
+function cancelTurnSound() {
+  if (turnSoundTimer) { clearTimeout(turnSoundTimer); turnSoundTimer = null; }
+}
 
 async function poll(session) {
   try {
@@ -462,7 +447,18 @@ async function poll(session) {
       lastHand = hand;
       lastAutoKey = null;
       lastPickedAction = null;
+      foldFiredForKey = null;
+      openState = 'idle';
+      openForKey = null;
+      cancelTurnSound();
+      turnSoundFiredForHand = null;
+      lastHasTurn = false;
     }
+
+    // false→true のエッジでのみスケジュール（常時 true の誤検知を防ぐ）
+    if (state.hasTurn && !lastHasTurn) scheduleTurnSound(autoKey, session);
+    lastHasTurn = state.hasTurn;
+
     if (lastAutoKey !== autoKey) {
       lastAutoKey = autoKey;
       lastPickedAction = gto ? pickAction(gto.freqs) : 'fold';
@@ -475,11 +471,47 @@ async function poll(session) {
       }
     }
 
-    const alreadyActed = false; // 抽選結果はブラウザDOM側で管理
+    const HIGH = new Set(['Q','K','A']);
+    const bothHigh = hand.length >= 2 && ((HIGH.has(hand[0]) && HIGH.has(hand[1])) || /^AJ/.test(hand));
+    const chosen = lastPickedAction ?? (gto ? gto.best : 'fold');
+    const isRFI = !!rangeKey?.startsWith('100bb_rfi_');
+    const shouldFoldOnce = !isBBOption && !bothHigh && chosen === 'fold';
+    const shouldOpen = isRFI && /^raise/.test(chosen);
+
+    // ---- CDP trusted key events（フォーカス不要）----
+
+    // 自動 fold
+    if (shouldFoldOnce && foldFiredForKey !== autoKey) {
+      foldFiredForKey = autoKey;
+      await cdpKey(session, 'f', 'KeyF', 70, 'f');
+      console.log(`  → 自動フォールド発火`);
+    }
+
+    // 自動 open（RFI のみ）
+    if (shouldOpen) {
+      if (openForKey !== autoKey) { openState = 'idle'; openForKey = autoKey; }
+
+      if (openState === 'idle' && state.hasTurn && raises.length === 0) {
+        openState = 'pressed_3';
+        await cdpKey(session, '3', 'Digit3', 51, '3');
+        console.log(`  → '3' 発火`);
+      } else if (openState === 'pressed_3' && state.hasBetSize) {
+        openState = 'done';
+        setTimeout(async () => {
+          await cdpKey(session, 'Enter', 'Enter', 13).catch(() => {});
+          console.log(`  → Enter 発火`);
+        }, 1000);
+      }
+    } else {
+      // RFI でなくなった（他のレイズが入った等）→ リセット
+      if (openForKey === autoKey && openState !== 'idle') {
+        openState = 'idle';
+      }
+    }
 
     // ページにオーバーレイ注入
     await session.send('Runtime.evaluate', {
-      expression: buildInjectJS(hand, pos.toUpperCase(), gto, rangeKey, vsLabel, isBBOption, alreadyActed, lastPickedAction),
+      expression: buildInjectJS(hand, pos.toUpperCase(), gto, rangeKey, vsLabel, isBBOption),
       returnByValue: false,
     });
 
