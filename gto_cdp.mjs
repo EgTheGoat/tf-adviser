@@ -28,8 +28,7 @@ const RANGES = require('./gto_ranges_bundle.json');
 // ============================================================
 // CONSTANTS
 // ============================================================
-const ts = () => new Date().toTimeString().slice(0, 8);
-const log = (...args) => console.log(`[${ts()}]`, ...args);
+const log = (...args) => console.log(...args);
 
 const RANK_ORDER = ['2','3','4','5','6','7','8','9','T','J','Q','K','A'];
 const ACTION_LABEL = { fold: 'フォールド', call: 'コール', raise: 'レイズ/3bet', raise_large: 'レイズ(3bb)' };
