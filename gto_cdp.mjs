@@ -319,30 +319,25 @@ function buildInjectJS(hand, myPos, gto, rangeKey, vsLabel, isBBOption, alreadyA
 
     // ---- 初回のみ: サイト音声を無効化 & 通知音セットアップ ----
     // HTML5 Audio を無音化
-    HTMLAudioElement.prototype.play = function() { return Promise.resolve(); };
-    // Web Audio API をミュート（オリジナルは GTO 通知音用に保存）
+    HTMLAudioElement.prototype.play = function() { this.volume = 0; return Promise.resolve(); };
+    // Web Audio API をダミーに差し替え（オリジナルは GTO 通知音用に保存）
     const _OrigCtx = window.AudioContext || window.webkitAudioContext;
     window._gtoAudioCtx = _OrigCtx;
-    window.AudioContext = window.webkitAudioContext = new Proxy(_OrigCtx, {
-      construct(Target, args) {
-        const ctx = new Target(...args);
-        const mute = ctx.createGain();
-        mute.gain.value = 0;
-        const _origConnect = ctx.destination;
-        ctx._muteGain = mute;
-        mute.connect(_origConnect);
-        const origCreate = ctx.createBufferSource.bind(ctx);
-        ctx.createBufferSource = function() {
-          const src = origCreate();
-          const origSrcConnect = src.connect.bind(src);
-          src.connect = function(dest, ...rest) {
-            return origSrcConnect(mute, ...rest);
-          };
-          return src;
-        };
-        return ctx;
-      }
-    });
+    const _noop = () => {};
+    const _fakeNode = () => ({ connect:()=>_fakeNode(), disconnect:_noop, start:_noop, stop:_noop,
+      frequency:{value:0,setValueAtTime:_noop,linearRampToValueAtTime:_noop,exponentialRampToValueAtTime:_noop},
+      gain:{value:1,setValueAtTime:_noop,linearRampToValueAtTime:_noop,exponentialRampToValueAtTime:_noop},
+      playbackRate:{value:1}, buffer:null, loop:false, onended:null });
+    const _fakeCtx = {
+      currentTime:0, sampleRate:44100, state:'running',
+      destination: _fakeNode(),
+      createOscillator: _fakeNode, createGain: _fakeNode, createBufferSource: _fakeNode,
+      createBuffer: ()=>({}), createStereoPanner: _fakeNode, createDynamicsCompressor: _fakeNode,
+      createAnalyser: _fakeNode, createWaveShaper: _fakeNode, createBiquadFilter: _fakeNode,
+      decodeAudioData: ()=>Promise.resolve({}),
+      resume:()=>Promise.resolve(), suspend:()=>Promise.resolve(), close:()=>Promise.resolve(),
+    };
+    window.AudioContext = window.webkitAudioContext = function() { return _fakeCtx; };
     // GTO ターン通知音（オリジナル AudioContext を使う）
     window._gtoBeep = function() {
       try {
