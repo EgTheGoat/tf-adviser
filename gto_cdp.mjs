@@ -383,7 +383,7 @@ function scheduleTurnSound(handKey, session) {
       });
       if (r?.result?.value === true) playTurnSound();
     } catch(e) {}
-  }, 2000);
+  }, 2500);
 }
 
 function cancelTurnSound() {
