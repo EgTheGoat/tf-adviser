@@ -317,56 +317,6 @@ function buildInjectJS(hand, myPos, gto, rangeKey, vsLabel, isBBOption, alreadyA
     ].join(';');
     document.body.appendChild(el);
 
-    // ---- 初回のみ: サイト音声を無効化 & 通知音セットアップ ----
-    // HTML5 Audio を無音化
-    HTMLAudioElement.prototype.play = function() { this.volume = 0; return Promise.resolve(); };
-    // Web Audio API をダミーに差し替え（オリジナルは GTO 通知音用に保存）
-    const _OrigCtx = window.AudioContext || window.webkitAudioContext;
-    window._gtoAudioCtx = _OrigCtx;
-    const _noop = () => {};
-    const _fakeNode = () => ({ connect:()=>_fakeNode(), disconnect:_noop, start:_noop, stop:_noop,
-      frequency:{value:0,setValueAtTime:_noop,linearRampToValueAtTime:_noop,exponentialRampToValueAtTime:_noop},
-      gain:{value:1,setValueAtTime:_noop,linearRampToValueAtTime:_noop,exponentialRampToValueAtTime:_noop},
-      playbackRate:{value:1}, buffer:null, loop:false, onended:null });
-    const _fakeCtx = {
-      currentTime:0, sampleRate:44100, state:'running',
-      destination: _fakeNode(),
-      createOscillator: _fakeNode, createGain: _fakeNode, createBufferSource: _fakeNode,
-      createBuffer: ()=>({}), createStereoPanner: _fakeNode, createDynamicsCompressor: _fakeNode,
-      createAnalyser: _fakeNode, createWaveShaper: _fakeNode, createBiquadFilter: _fakeNode,
-      decodeAudioData: ()=>Promise.resolve({}),
-      resume:()=>Promise.resolve(), suspend:()=>Promise.resolve(), close:()=>Promise.resolve(),
-    };
-    window.AudioContext = window.webkitAudioContext = function() { return _fakeCtx; };
-    // GTO ターン通知音（オリジナル AudioContext を使う）
-    window._gtoBeep = function() {
-      try {
-        const ctx = new window._gtoAudioCtx();
-        const osc = ctx.createOscillator();
-        const gain = ctx.createGain();
-        osc.connect(gain);
-        gain.connect(ctx.destination);
-        osc.type = 'sine';
-        osc.frequency.value = 880;
-        gain.gain.setValueAtTime(0.4, ctx.currentTime);
-        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.4);
-        osc.start(ctx.currentTime);
-        osc.stop(ctx.currentTime + 0.4);
-      } catch(e) {}
-    };
-
-    // ターン監視（2秒後に通知音）
-    el._turnNotified = false;
-    el._turnWatcherId = setInterval(() => {
-      const hasTurn = Array.from(document.querySelectorAll('button'))
-        .some(btn => !btn.closest('.seat-anchor') && /^(Fold|Call|Raise|Bet|Check)$/.test(btn.textContent.trim()));
-      if (hasTurn && !el._turnNotified) {
-        el._turnNotified = true;
-        setTimeout(() => { if (window._gtoBeep) window._gtoBeep(); }, 2000);
-      } else if (!hasTurn) {
-        el._turnNotified = false;
-      }
-    }, 200);
   }
   el.innerHTML = ${JSON.stringify(content)};
 
